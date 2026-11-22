@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "直播弹幕获客",
+    "description": "通过 BrowserSkill 读取抖音直播间弹幕，按目标人群筛出潜在客户。左侧栏入口提供扫描面板与 CSV 导出，同时提供 danmaku_leads 智能体工具。"
+  }
+}
