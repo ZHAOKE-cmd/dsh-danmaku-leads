@@ -1,19 +1,19 @@
 # 直播弹幕获客（dsh-danmaku-leads）
 
-DeepSeek Harness（DSH）插件：通过 **BrowserSkill** 读取抖音直播间的弹幕，按目标人群筛出潜在客户。
+DeepSeek Harness（DSH）插件：通过**本机浏览器桥接**读取抖音直播间的弹幕，按目标人群筛出潜在客户。
 左侧栏有独立入口和扫描面板，智能体也能用 `danmaku_leads` 工具完成同样的事。
 
-- 目标人群可配置，默认测试人群：**想学习嵌入式的人**（`target: 想学习嵌入式的人`）
-- BrowserSkill 浏览器实例名：**测试抖音链接**
-- BrowserSkill 守护进程：**ws://127.0.0.1:52800**
+- 目标人群：面板里可自定义，默认 `想学习嵌入式的人`
+- 浏览器实例名：`测试抖音链接`
+- 桥接守护进程：`ws://127.0.0.1:52800`
 
 ## 目录
 
 ```
 dsh-danmaku-leads/
-├─ index.js            Host 半：驱动 bsk、扫描循环、HTTP 面板接口、danmaku_leads 工具
+├─ index.js            Host 半：驱动桥接程序、扫描循环、HTTP 面板接口、danmaku_leads 工具
 ├─ client.js           Client 半：左侧栏入口 + 主区面板
-├─ lib/bsk.js          bsk CLI 封装（命令、JSON 信封、超时、守护进程探测）
+├─ lib/bridge.js       桥接程序封装（命令、JSON 信封、超时、可执行文件解析）
 ├─ lib/leads.js        弹幕解析 + 目标客户判定（纯函数）
 ├─ locale/             插件列表里的标题/描述（zh、en）
 ├─ icon.svg            插件图标
@@ -23,20 +23,16 @@ dsh-danmaku-leads/
 
 ## 前置条件
 
-插件本身不启动浏览器，它调用本机的 BrowserSkill：
+插件本身不启动浏览器，它调用本机已安装的浏览器桥接：
 
-1. 安装 `bsk` CLI（官方脚本装到 `C:\Users\<你>\.local\bin\bsk.exe`；插件会自己找到它，不必改 PATH、也不用重启 DSH）：
-
-   ```powershell
-   irm https://raw.githubusercontent.com/Tencent/BrowserSkill/main/install.ps1 | iex
-   & "$env:USERPROFILE\.local\bin\bsk.exe" --version
-   ```
-
-2. 在 Chrome / Edge 安装 **BrowserSkill** 扩展，并在扩展里把该浏览器实例命名为 **测试抖音链接**。
-   脚本读取需要扩展协议 **1.9**；扩展 0.4.2（协议 1.8）会提示更新。
-3. 守护进程走 `127.0.0.1:52800`（对应 `daemonUrl`），首次执行 `bsk` 命令时会自动启动；扩展显示 **Connected**。
-   若宿主进程不允许 daemon 脱离（报 `os error 5` / breakaway），在独立终端执行 `bsk daemon start --foreground` 常驻。
-4. 在该浏览器里**打开目标抖音直播间**。留空 `roomUrl` 时插件借用这个已打开的标签页——无人值守时请先在扩展
+1. 本机已安装**浏览器桥接命令行程序**（安装包与说明由项目维护者提供，本仓库不包含）。
+   默认会自动在 `~/.local/bin`、`~/bin` 和 `PATH` 里查找；装在别处时用 `bridgePath` 指定绝对路径。
+2. 浏览器里已安装**对应的桥接扩展**，并把该浏览器实例命名为 `测试抖音链接`。
+   扩展协议需 **1.9**；1.8 会退回「严格观察」的兼容读取，弹幕高频刷新时可能偶尔被拒。
+3. 守护进程走 `127.0.0.1:52800`（对应 `daemonUrl`），首次执行桥接命令时会自动启动，扩展显示 **Connected**。
+   若宿主进程不允许守护进程脱离（报 `os error 5` / breakaway），在独立终端执行
+   `daemon start --foreground` 常驻（可执行文件即上面的桥接程序）。
+4. 在该浏览器里**打开目标抖音直播间**。留空 `roomUrl` 时插件借用这个已打开的标签页——无人值守时请先在扩展的
    Automation settings 关闭「Confirm before borrowing tabs」；或直接填 `roomUrl`，插件会新开标签页导航过去（无需确认）。
 
 ## 安装
@@ -50,7 +46,7 @@ plugin_manager → action: install_bundle → target: E:\code\PycharmProjects\gu
 或在 Web UI 的 **Plugins → Add plugin** 里选择这个目录。
 安装后左侧栏出现「弹幕获客」入口；`danmaku_leads` 工具对本 profile 的会话生效。
 
-打包产物 `dist/dsh-danmaku-leads-1.0.1.tgz` 用于分发给别人：对方解压/`npm i` 该 tgz 后按上面的方式安装目录。
+打包产物 `dist/dsh-danmaku-leads-1.0.3.tgz` 用于分发给别人：对方解压/`npm i` 该 tgz 后按上面的方式安装目录。
 
 ## 配置
 
@@ -59,15 +55,15 @@ plugin_manager → action: install_bundle → target: E:\code\PycharmProjects\gu
 ```yaml
 - id: danmaku-leads
   config:
-    bskPath: bsk                    # 默认自动查找 ~/.local/bin/bsk.exe；自定义安装位置时填绝对路径
-    browserName: 测试抖音链接        # BrowserSkill 里的浏览器实例名
-    daemonUrl: "ws://127.0.0.1:52800"  # 仅用于说明/排障，端口由 bsk 自己管理
+    bridgePath: ""                  # 空 = 自动查找；自定义安装位置时填可执行文件绝对路径
+    browserName: 测试抖音链接        # 浏览器里的实例名
+    daemonUrl: "ws://127.0.0.1:52800"  # 仅用于说明/排障，端口由桥接程序自己管理
     target: 想学习嵌入式的人
     roomUrl: ""                     # 空 = 借用已打开的抖音直播标签页
     minScore: 4                     # 命中阈值，见下
     pollMs: 4000                    # 轮询间隔
-    timeoutMs: 120000               # 单条 bsk 命令超时
-    noFocus: true                   # Agent 窗口不抢焦点
+    timeoutMs: 120000               # 单条桥接命令超时
+    noFocus: true                   # 新开的标签页不抢焦点
     selectors:                      # 弹幕节点选择器，抖音改版时在此覆盖
       - '[data-e2e="chat-message"]'
       - '[class*="webcast-chatroom" i] [class*="item" i]'
@@ -82,7 +78,7 @@ plugin_manager → action: install_bundle → target: E:\code\PycharmProjects\gu
 1. 点左侧栏「弹幕获客」。
 2. **目标人群**：面板顶部输入框可直接改（默认「想学习嵌入式的人」），改完点开始/单次扫描即时生效。
 3. （可选）粘贴直播间链接。
-4. **开始扫描**：连接 daemon → 打开/借用直播标签页 → 每 `pollMs` 读取一次页面上的弹幕。
+4. **开始扫描**：连接守护进程 → 打开/借用直播标签页 → 每 `pollMs` 读取一次页面上的弹幕。
 5. 面板显示：状态、浏览器、会话、累计弹幕数、轮询次数、当前主题词、目标客户表（昵称 / 弹幕 / 命中词 / 匹配分）和最新弹幕。
 6. **单次扫描**：抓一次就结束；**停止**：结束会话；**导出 CSV**：把当前客户表导出（UTF-8 BOM，Excel 可直接打开）。
 
@@ -124,21 +120,21 @@ score = 主题词命中数 × 2 + 意向词命中数 × 2 + 疑问标记(？/怎
 node test/selftest.mjs
 ```
 
-覆盖：目标人群判定正反例、弹幕解析/昵称归一/去重、bsk JSON 信封与退出码处理、CLI 路径解析、页面脚本语法。
+覆盖：目标人群判定正反例、弹幕解析/昵称归一/去重、桥接 JSON 信封与退出码处理、可执行文件路径解析、页面脚本语法。
 
 ## 已知限制
 
 - **真实观众弹幕尚未抓到**：验证时连上的是 `live.douyin.com/83988997007`，页面处于「直播加载中」、弹幕列表为空。
-  链路本身已在真实浏览器里跑通（sync → 读页面 → 解析 → 判定 → 面板显示），用的是临时注入的 3 条测试弹幕，
+  链路本身已在真实浏览器里跑通（同步 → 读页面 → 解析 → 判定 → 面板显示），用的是临时注入的 3 条测试弹幕，
   测完已删除并清空数据。等有真实弹幕的直播间再扫一次即可。
-- **扩展协议要 1.9**：扩展 0.4.2 是协议 1.8，`evaluate --unverified` 会被拒绝；插件会退回「sync + 严格观察」，
-  弹幕高频刷新时这一路可能偶尔被拒（面板会显示原因）。在扩展商店更新到 1.9+ 后最稳。
+- **扩展协议要 1.9**：1.8 的扩展不完全支持无校验脚本读取；插件会退回「同步 + 严格观察」，
+  弹幕高频刷新时这一路可能偶尔被拒（面板会显示原因，下一轮会自愈）。扩展更新到 1.9+ 后最稳。
 - 抖音直播间是动态且会改版的：弹幕靠 `.webcast-chatroom___list` 子节点 + `selectors` 定位，改版后可能抓不到——
   用开发者工具找到新的弹幕容器选择器写进配置即可。
 - 只读取**当前页面已渲染**的可见弹幕：不滚动历史、不调接口、不破解登录态。
 - 规则筛选是粗筛，导出前请人工复核；不要采集或外传账号、手机号等敏感信息。
-- 借用标签页/人工接管由 BrowserSkill 扩展的自动化设置决定，插件不会绕过；无人值守时请关掉借用确认或用 `roomUrl`。
+- 借用标签页/人工接管由桥接扩展的自动化设置决定，插件不会绕过；无人值守时请关掉借用确认或用 `roomUrl`。
 
 ## 版本
 
-1.0.2 · MIT
+1.0.3 · MIT

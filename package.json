@@ -1,8 +1,8 @@
 {
   "name": "dsh-danmaku-leads",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
-  "description": "Captures Douyin live-room danmaku through BrowserSkill and picks out target customers.",
+  "description": "Captures Douyin live-room danmaku through a local browser bridge and picks out target customers.",
   "type": "module",
   "exports": {
     ".": "./index.js",

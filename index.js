@@ -1,13 +1,14 @@
 /**
- * Host half: drives BrowserSkill, turns live-room danmaku into target customers,
- * and serves the panel that the client half renders in the left sidebar.
+ * Host half: drives the local browser bridge, turns live-room danmaku into
+ * target customers, and serves the panel that the client half renders in the
+ * left sidebar.
  *
  * One capture session at a time. Everything the agent tool returns is the same
  * snapshot the panel reads from `/danmaku-leads/state`.
  */
 import {
-  BskError, buildDanmakuScript, createRunner, evaluateValue, payload, resolveBskPath, runJson,
-} from './lib/bsk.js'
+  BridgeError, buildDanmakuScript, createRunner, evaluateValue, payload, resolveBridgePath, runJson,
+} from './lib/bridge.js'
 import { classify, parseDanmaku, targetTerms, upsertLead } from './lib/leads.js'
 
 export const name = 'dsh-danmaku-leads'
@@ -34,7 +35,7 @@ const DEFAULT_SELECTORS = [
  */
 export function apply(ctx, config = {}) {
   const cfg = {
-    bskPath: typeof config.bskPath === 'string' ? config.bskPath : 'bsk',
+    bridgePath: typeof config.bridgePath === 'string' ? config.bridgePath : '',
     browserName: typeof config.browserName === 'string' ? config.browserName : '测试抖音链接',
     daemonUrl: typeof config.daemonUrl === 'string' ? config.daemonUrl : 'ws://127.0.0.1:52800',
     roomUrl: typeof config.roomUrl === 'string' ? config.roomUrl : '',
@@ -47,8 +48,8 @@ export function apply(ctx, config = {}) {
       ? config.selectors.filter((item) => typeof item === 'string')
       : DEFAULT_SELECTORS,
   }
-  const bskPath = resolveBskPath(cfg.bskPath)
-  const runner = createRunner(bskPath)
+  const bridgePath = resolveBridgePath(cfg.bridgePath)
+  const runner = createRunner(bridgePath)
   /** The target audience is editable at run time; its words join the built-in topic list. */
   const target = { text: cfg.target, terms: targetTerms(cfg.target) }
   function setTarget(text) {
@@ -90,7 +91,7 @@ export function apply(ctx, config = {}) {
       target: target.text,
       targetTerms: target.terms,
       minScore: cfg.minScore,
-      bskPath,
+      bridgePath,
       browserName: cfg.browserName,
       daemonUrl: cfg.daemonUrl,
       selectors: cfg.selectors.length,
@@ -144,7 +145,7 @@ export function apply(ctx, config = {}) {
     const contextId = sync?.context_id
     const observationId = sync?.observation_id
     if (typeof contextId !== 'string' || typeof observationId !== 'string') {
-      throw new BskError('bsk cooperate sync 未返回 context_id/observation_id', {
+      throw new BridgeError('桥接程序 cooperate sync 未返回 context_id/observation_id', {
         code: 'bad_output',
         detail: JSON.stringify(sync).slice(0, 400),
       })
@@ -156,15 +157,15 @@ export function apply(ctx, config = {}) {
       ], { timeoutMs: EVAL_TOTAL_TIMEOUT() })
     } catch (error) {
       // A live chat changes between sync and evaluate; 1.9+ peers accept an unverified read as the retry.
-      if (!(error instanceof BskError) || !/observ|unused strict|changed|match/i.test(error.message)) throw error
+      if (!(error instanceof BridgeError) || !/observ|unused strict|changed|match/i.test(error.message)) throw error
       try {
         reply = await runJson(runner, [
           'evaluate', script, '--session', sessionId, '--context', contextId, '--unverified', '--timeout', EVAL_TIMEOUT,
         ], { timeoutMs: EVAL_TOTAL_TIMEOUT() })
       } catch (fallbackError) {
-        if (fallbackError instanceof BskError && /unverified|protocol 1\.9/i.test(fallbackError.message)) {
-          throw new BskError(
-            'BrowserSkill 扩展协议版本过低：脚本读取需要扩展协议 1.9（当前 1.8）。请在 Edge/Chrome 扩展商店更新 BrowserSkill 扩展，重连后再试。',
+        if (fallbackError instanceof BridgeError && /unverified|protocol 1\.9/i.test(fallbackError.message)) {
+          throw new BridgeError(
+            '浏览器桥接扩展协议版本过低：脚本读取需要扩展协议 1.9（当前 1.8）。请在浏览器扩展商店更新该扩展，重连后再试。',
             { code: 'extension_outdated', detail: fallbackError.message },
           )
         }
@@ -173,7 +174,7 @@ export function apply(ctx, config = {}) {
     }
     const value = evaluateValue(reply)
     if (!Array.isArray(value)) {
-      throw new BskError('bsk evaluate 未返回弹幕数组（页面里可能还没有弹幕列表）', { code: 'bad_output', detail: JSON.stringify(value).slice(0, 400) })
+      throw new BridgeError('桥接程序 evaluate 未返回弹幕数组（页面里可能还没有弹幕列表）', { code: 'bad_output', detail: JSON.stringify(value).slice(0, 400) })
     }
     ingest(value, Date.now())
     status.scans += 1
@@ -197,7 +198,7 @@ export function apply(ctx, config = {}) {
   }
 
   function messageOf(error) {
-    if (error instanceof BskError) return error.hint === undefined ? error.message : `${error.message} ${error.hint}`
+    if (error instanceof BridgeError) return error.hint === undefined ? error.message : `${error.message} ${error.hint}`
     return error instanceof Error ? error.message : String(error)
   }
 
@@ -218,7 +219,7 @@ export function apply(ctx, config = {}) {
     const tabs = Array.isArray(payload(reply)?.tabs) ? payload(reply).tabs : []
     const room = tabs.find((tab) => isLiveRoom(tab?.url))
     if (room === undefined) {
-      throw new BskError(
+      throw new BridgeError(
         `「${cfg.browserName}」里没有找到抖音直播间标签页。请先在该浏览器打开直播间，或在插件配置/面板里填写 roomUrl。`,
         { code: 'no_live_room' },
       )
@@ -226,8 +227,8 @@ export function apply(ctx, config = {}) {
     try {
       await runJson(runner, ['tab', 'borrow', String(room.tab_id), '--session', sessionId], { timeoutMs: 30000 })
     } catch (error) {
-      if (error instanceof BskError && /borrow confirmation/i.test(error.message)) {
-        throw new BskError(
+      if (error instanceof BridgeError && /borrow confirmation/i.test(error.message)) {
+        throw new BridgeError(
           '借用直播间标签页需要人工确认，但当前没有可显示的确认界面。二选一：在扩展的 Automation settings 关闭「Confirm before borrowing tabs」，'
           + '或在面板/配置里填写 roomUrl（插件会新开标签页，无需借用）。',
           { code: 'borrow_confirmation_unavailable', detail: error.message },
@@ -244,18 +245,18 @@ export function apply(ctx, config = {}) {
     status.status = 'starting'
     status.error = null
     try {
-      // Fail with install guidance before blaming the daemon when the CLI itself is missing.
+      // Fail with install guidance before blaming the daemon when the bridge itself is missing.
       await runner.run(['--version'], { timeoutMs: 15000 })
       const startArgs = ['session', 'start', '--browser', cfg.browserName]
       if (cfg.noFocus) startArgs.push('--no-focus')
       let reply
       try {
-        // bsk starts its own daemon on first use; only its failure needs the manual start hint.
+        // The bridge starts its own daemon on first use; only its failure needs the manual start hint.
         reply = await runJson(runner, startArgs, { timeoutMs: cfg.timeoutMs })
       } catch (error) {
-        if (error instanceof BskError && /daemon|os error 5|breakaway/i.test(error.message)) {
-          throw new BskError(
-            `${error.message} 守护进程可能未能启动：请在独立终端执行 \`bsk daemon start --foreground\`（或普通终端 \`bsk daemon start\`）后重试。`,
+        if (error instanceof BridgeError && /daemon|os error 5|breakaway/i.test(error.message)) {
+          throw new BridgeError(
+            `${error.message} 守护进程可能未能启动：请在独立终端执行 \`${bridgePath || 'bridge'} daemon start --foreground\` 后重试。`,
             { code: 'daemon_down', hint: error.hint },
           )
         }
@@ -263,7 +264,7 @@ export function apply(ctx, config = {}) {
       }
       const sessionId = payload(reply)?.session_id ?? payload(reply)?.sessionId
       if (typeof sessionId !== 'string' || sessionId === '') {
-        throw new BskError('bsk session start 未返回 session_id', { code: 'bad_output', detail: JSON.stringify(reply).slice(0, 400) })
+        throw new BridgeError('桥接程序 session start 未返回 session_id', { code: 'bad_output', detail: JSON.stringify(reply).slice(0, 400) })
       }
       status.sessionId = sessionId
       if (status.roomUrl !== '') {
@@ -330,7 +331,7 @@ export function apply(ctx, config = {}) {
         reset()
         break
       default:
-        throw new BskError(`未知操作：${verb}`, { code: 'bad_request' })
+        throw new BridgeError(`未知操作：${verb}`, { code: 'bad_request' })
     }
     return snapshot()
   }
@@ -363,11 +364,11 @@ export function apply(ctx, config = {}) {
       let body = ''
       req.on('data', (chunk) => {
         body += chunk
-        if (body.length > 64 * 1024) reject(new BskError('请求体过大', { code: 'bad_request' }))
+        if (body.length > 64 * 1024) reject(new BridgeError('请求体过大', { code: 'bad_request' }))
       })
       req.on('end', () => {
         if (body.trim() === '') { resolve({}); return }
-        try { resolve(JSON.parse(body)) } catch { reject(new BskError('请求体不是合法 JSON', { code: 'bad_request' })) }
+        try { resolve(JSON.parse(body)) } catch { reject(new BridgeError('请求体不是合法 JSON', { code: 'bad_request' })) }
       })
       req.on('error', reject)
     })
@@ -412,8 +413,8 @@ export function apply(ctx, config = {}) {
 
   ctx.tools?.register({
     name: 'danmaku_leads',
-    description: 'Capture Douyin live-room danmaku through BrowserSkill and list viewers who look like target customers. '
-      + 'The target audience and the BrowserSkill browser are plugin configuration. '
+    description: 'Capture Douyin live-room danmaku through the local browser bridge and list viewers who look like target customers. '
+      + 'The target audience and the bridge browser are plugin configuration. '
       + 'start opens a browser session and polls the live room; status shows the collected leads; scan captures once and stops; '
       + 'stop ends the session; reset clears collected data.',
     parameters: {

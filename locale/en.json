@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Live danmaku leads",
-    "description": "Reads Douyin live-room danmaku through BrowserSkill and picks out target customers. A left-sidebar panel scans, shows leads, and exports CSV; the danmaku_leads agent tool does the same from chat."
+    "description": "Reads Douyin live-room danmaku through a local browser bridge and picks out target customers. A left-sidebar panel scans, shows leads, and exports CSV; the danmaku_leads agent tool does the same from chat."
   }
 }

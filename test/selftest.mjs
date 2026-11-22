@@ -1,10 +1,10 @@
 /**
  * Self-check for the danmaku → target-customer pipeline.
- * Runs without a browser, a daemon or the bsk CLI: `node test/selftest.mjs`.
+ * Runs without a browser, a daemon or the bridge CLI: `node test/selftest.mjs`.
  */
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { buildDanmakuScript, createRunner, evaluateValue, payload, resolveBskPath, runJson } from '../lib/bsk.js'
+import { buildDanmakuScript, createRunner, evaluateValue, payload, resolveBridgePath, runJson } from '../lib/bridge.js'
 import { classify, parseDanmaku, targetTerms, upsertLead } from '../lib/leads.js'
 
 // --- target-customer judgement -------------------------------------------------
@@ -56,7 +56,7 @@ assert.deepEqual(
   ['小刚'],
 )
 
-// --- bsk CLI plumbing ---------------------------------------------------------
+// --- bridge CLI plumbing ---------------------------------------------------------
 function fakeSpawn(text, exitCode = 0) {
   const seen = []
   return {
@@ -80,21 +80,20 @@ function fakeSpawn(text, exitCode = 0) {
 
 // A success envelope exposes its payload and always asks for JSON.
 const okFake = fakeSpawn(JSON.stringify({ ok: true, data: { session_id: 's-1', tabs: [{ tab_id: 7, url: 'https://live.douyin.com/1' }] } }))
-const okBody = await runJson(createRunner('bsk', okFake.spawn), ['session', 'start', '--browser', '测试抖音链接'])
+const okBody = await runJson(createRunner('bridge', okFake.spawn), ['session', 'start', '--browser', '测试抖音链接'])
 assert.equal(payload(okBody).session_id, 's-1')
 assert.equal(payload(okBody).tabs[0].tab_id, 7)
 assert.equal(okFake.seen[0].args.at(-1), '--json')
-assert.equal(okFake.seen[0].options.env.BSK_CANCEL_ON_STDIN_CLOSE, '1')
 
-// An error envelope becomes a thrown BskError instead of a silent success.
+// An error envelope becomes a thrown BridgeError instead of a silent success.
 await assert.rejects(
-  runJson(createRunner('bsk', fakeSpawn(JSON.stringify({ ok: false, code: 'no_browser', message: 'browser not connected' })).spawn), ['session', 'start']),
+  runJson(createRunner('bridge', fakeSpawn(JSON.stringify({ ok: false, code: 'no_browser', message: 'browser not connected' })).spawn), ['session', 'start']),
   /browser not connected/,
 )
 
 // Plain non-JSON output with a bad exit code keeps the exit code visible.
 await assert.rejects(
-  runJson(createRunner('bsk', fakeSpawn('boom', 3).spawn), ['--version']),
+  runJson(createRunner('bridge', fakeSpawn('boom', 3).spawn), ['--version']),
   /退出码 3/,
 )
 
@@ -107,7 +106,7 @@ const script = buildDanmakuScript(['[data-e2e="chat-message"]'])
 assert.doesNotThrow(() => new Function(`return ${script}`))
 assert.match(script, /querySelectorAll/)
 
-// An explicit CLI path is used as given; a bare `bsk` may resolve to an install dir.
-assert.equal(resolveBskPath('C:\\tools\\bsk.exe'), 'C:\\tools\\bsk.exe')
+// An explicit bridge path is used as given.
+assert.equal(resolveBridgePath('C:\\tools\\bridge.exe'), 'C:\\tools\\bridge.exe')
 
 console.log('danmaku-leads selftest: ok')

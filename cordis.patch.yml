@@ -2,7 +2,6 @@
     - id: danmaku-leads
       name: dsh-danmaku-leads
       config:
-        bskPath: bsk
         browserName: 测试抖音链接
         daemonUrl: "ws://127.0.0.1:52800"
         target: 想学习嵌入式的人
